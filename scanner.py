@@ -378,15 +378,28 @@ class WebScanner:
             for comment in results["security"]["suspicious_comments"][:3]:
                 print(f"   - {comment}")
         
-        # SSL
-        if results["ssl"]["issues"]:
-            print(f"\n\U0001f512 SSL ISSUES:")
-            for issue in results["ssl"]["issues"][:3]:
+        # SSL / Certificate
+        ssl_data = results["ssl"]
+        if ssl_data.get("has_https") and ssl_data.get("has_valid_certificate"):
+            cert = ssl_data.get("certificate", {})
+            print(f"\n\U0001f512 SSL CERTIFICATE: \u2705 Valid")
+            if cert.get("issuer"):
+                print(f"   Issuer: {cert['issuer']}")
+            if cert.get("expires"):
+                days = cert.get('days_remaining', '?')
+                print(f"   Expires: {cert['expires']} ({days} days remaining)")
+        elif ssl_data.get("has_https"):
+            print(f"\n\U0001f512 SSL CERTIFICATE: \u26a0\ufe0f  Problem detected")
+        else:
+            print(f"\n\U0001f512 SSL CERTIFICATE: \U0001f534 Site not using HTTPS")
+        
+        if ssl_data["issues"]:
+            for issue in ssl_data["issues"][:3]:
                 print(f"   \U0001f534 {issue}")
         
-        if results["ssl"].get("missing_headers"):
+        if ssl_data.get("missing_headers"):
             print(f"\n\U0001f6e1\ufe0f  SECURITY HEADERS (informational):")
-            for header in results["ssl"]["missing_headers"][:3]:
+            for header in ssl_data["missing_headers"][:3]:
                 print(f"   - {header}")
         
         # SEO

@@ -2,6 +2,9 @@
 Detector de problemas de SSL y análisis SEO básico
 """
 import re
+import ssl
+import socket
+from datetime import datetime, timezone
 from typing import Dict
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
@@ -9,12 +12,76 @@ from urllib.parse import urlparse
 class SSLSEODetector:
     """Detecta problemas de SSL y realiza análisis SEO básico"""
     
+    def _verify_certificate(self, hostname: str) -> Dict:
+        """
+        Verifica el certificado SSL real del servidor.
+        
+        Returns:
+            Dict con info del certificado o error
+        """
+        cert_info = {
+            "valid": False,
+            "issuer": None,
+            "subject": None,
+            "expires": None,
+            "days_remaining": None,
+            "error": None,
+        }
+        
+        try:
+            context = ssl.create_default_context()
+            with socket.create_connection((hostname, 443), timeout=10) as sock:
+                with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+                    
+                    # Certificado válido (si llegamos aquí no hubo error SSL)
+                    cert_info["valid"] = True
+                    
+                    # Emisor
+                    issuer_parts = []
+                    for rdn in cert.get("issuer", ()):
+                        for attr_type, attr_value in rdn:
+                            if attr_type in ("organizationName", "commonName"):
+                                issuer_parts.append(attr_value)
+                    cert_info["issuer"] = " - ".join(issuer_parts) if issuer_parts else "Unknown"
+                    
+                    # Sujeto (dominio)
+                    subject_parts = []
+                    for rdn in cert.get("subject", ()):
+                        for attr_type, attr_value in rdn:
+                            if attr_type == "commonName":
+                                subject_parts.append(attr_value)
+                    cert_info["subject"] = ", ".join(subject_parts) if subject_parts else hostname
+                    
+                    # Fecha de expiración
+                    not_after = cert.get("notAfter")
+                    if not_after:
+                        # Formato: 'Mar  4 12:00:00 2026 GMT'
+                        exp_date = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+                        exp_date = exp_date.replace(tzinfo=timezone.utc)
+                        cert_info["expires"] = exp_date.strftime("%Y-%m-%d")
+                        days_left = (exp_date - datetime.now(timezone.utc)).days
+                        cert_info["days_remaining"] = days_left
+                        
+        except ssl.SSLCertVerificationError as e:
+            cert_info["error"] = f"Invalid certificate: {str(e)[:150]}"
+        except ssl.SSLError as e:
+            cert_info["error"] = f"SSL error: {str(e)[:150]}"
+        except socket.timeout:
+            cert_info["error"] = "Connection timeout verifying certificate"
+        except OSError as e:
+            cert_info["error"] = f"Connection error: {str(e)[:150]}"
+        except Exception as e:
+            cert_info["error"] = f"Error checking certificate: {str(e)[:150]}"
+        
+        return cert_info
+    
     def detect_ssl_issues(self, url: str, response_headers: Dict = None) -> Dict:
         """
-        Detecta problemas de SSL
+        Detecta problemas de SSL verificando el certificado real del servidor.
         
         Args:
-            url: URL del sitio
+            url: URL del sitio (final URL después de redirects)
             response_headers: Headers de la respuesta HTTP
             
         Returns:
@@ -22,6 +89,8 @@ class SSLSEODetector:
         """
         results = {
             "has_https": False,
+            "has_valid_certificate": False,
+            "certificate": {},
             "has_mixed_content": False,
             "missing_headers": [],
             "issues": [],
@@ -30,14 +99,35 @@ class SSLSEODetector:
         
         parsed = urlparse(url)
         
-        # Verificar si usa HTTPS
+        # Verificar si la URL final usa HTTPS
         if parsed.scheme == "https":
             results["has_https"] = True
+            
+            # Verificar certificado SSL real
+            cert_info = self._verify_certificate(parsed.hostname)
+            results["certificate"] = cert_info
+            
+            if cert_info["valid"]:
+                results["has_valid_certificate"] = True
+                
+                # Avisar si el certificado expira pronto (< 30 días)
+                if cert_info["days_remaining"] is not None and cert_info["days_remaining"] < 30:
+                    if cert_info["days_remaining"] < 0:
+                        results["issues"].append(
+                            f"SSL certificate EXPIRED ({abs(cert_info['days_remaining'])} days ago)"
+                        )
+                    else:
+                        results["issues"].append(
+                            f"SSL certificate expires soon ({cert_info['days_remaining']} days remaining)"
+                        )
+            else:
+                results["issues"].append(
+                    f"SSL certificate problem: {cert_info.get('error', 'Unknown error')}"
+                )
         else:
             results["issues"].append("Site not using HTTPS")
-            results["severity"] = "high"
         
-        # Verificar headers de seguridad (si están disponibles)
+        # Verificar headers de seguridad (informativos, no problemas reales)
         if response_headers:
             security_headers = {
                 "Strict-Transport-Security": "Missing HSTS header",
@@ -49,10 +139,15 @@ class SSLSEODetector:
                 if header not in response_headers:
                     results["missing_headers"].append(message)
         
-        # Solo subir severidad si hay problemas reales (no HTTPS)
-        # Missing headers son informativos, no un problema crítico
-        if results["issues"] and results["severity"] == "none":
-            results["severity"] = "high"
+        # Determinar severidad basada en problemas reales
+        if results["issues"]:
+            # Check for critical issues
+            if any("EXPIRED" in i or "not using HTTPS" in i for i in results["issues"]):
+                results["severity"] = "high"
+            elif any("expires soon" in i for i in results["issues"]):
+                results["severity"] = "medium"
+            else:
+                results["severity"] = "medium"
         elif results["missing_headers"] and results["severity"] == "none":
             results["severity"] = "low"
         
@@ -195,16 +290,24 @@ def test_ssl_seo_detector():
     detector = SSLSEODetector()
     
     # Test 1: SSL - sitio sin HTTPS
-    print("\n✓ Test 1 - SSL Issues:")
+    print("\n✓ Test 1 - SSL Issues (http):")
     result1 = detector.detect_ssl_issues("http://example.com")
     print(f"  Has HTTPS: {result1['has_https']}")
+    print(f"  Valid cert: {result1['has_valid_certificate']}")
     print(f"  Issues: {result1['issues']}")
     print(f"  Severity: {result1['severity']}")
     
-    # Test 2: SSL - sitio con HTTPS
-    print("\n✓ Test 2 - SSL Secure:")
+    # Test 2: SSL - sitio con HTTPS (real cert check)
+    print("\n✓ Test 2 - SSL Secure (https://example.com):")
     result2 = detector.detect_ssl_issues("https://example.com")
     print(f"  Has HTTPS: {result2['has_https']}")
+    print(f"  Valid cert: {result2['has_valid_certificate']}")
+    cert = result2.get('certificate', {})
+    if cert.get('valid'):
+        print(f"  Issuer: {cert.get('issuer')}")
+        print(f"  Expires: {cert.get('expires')} ({cert.get('days_remaining')} days)")
+    else:
+        print(f"  Cert error: {cert.get('error')}")
     print(f"  Severity: {result2['severity']}")
     
     # Test 3: SEO - sitio con problemas
