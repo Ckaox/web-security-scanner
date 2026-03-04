@@ -333,6 +333,14 @@ class WebScanner:
         # Detalles por categoría
         results = scan_result["results"]
         
+        # Si el fetch falló, los dicts estarán vacíos - salir temprano
+        if not scan_result["fetch_info"].get("success"):
+            error_msg = scan_result["fetch_info"].get("error", "Unknown error")
+            print(f"\n🚨 FETCH FAILED: {error_msg}")
+            print(f"   Cannot analyze site - connection failed.")
+            print("\n" + "="*70)
+            return
+        
         # Maintenance Mode
         if results.get("maintenance_mode", {}).get("is_maintenance"):
             print(f"\n\U0001f6a7 MAINTENANCE MODE DETECTED:")
@@ -341,45 +349,47 @@ class WebScanner:
             print(f"   ⚠️  Results may be incomplete - site is not serving normal content")
         
         # PHP Errors
-        if results["php_errors"]["has_errors"]:
+        php = results.get("php_errors", {})
+        if php.get("has_errors"):
             print(f"\n🔴 PHP/DATABASE ERRORS:")
-            if results["php_errors"]["php_errors"]:
-                print(f"   - PHP errors found: {len(results['php_errors']['php_errors'])}")
-                for error in results["php_errors"]["php_errors"][:2]:
+            if php.get("php_errors"):
+                print(f"   - PHP errors found: {len(php['php_errors'])}")
+                for error in php["php_errors"][:2]:
                     print(f"     • {error[:80]}...")
-            if results["php_errors"]["db_errors"]:
-                print(f"   - Database errors found: {len(results['php_errors']['db_errors'])}")
+            if php.get("db_errors"):
+                print(f"   - Database errors found: {len(php['db_errors'])}")
         
         # Security
-        if results["security"]["is_hacked"] or results["security"]["has_spam_seo"] or results["security"]["has_malware"]:
+        sec = results.get("security", {})
+        if sec.get("is_hacked") or sec.get("has_spam_seo") or sec.get("has_malware"):
             print(f"\n🚨 SECURITY ISSUES:")
-            if results["security"]["is_hacked"]:
+            if sec.get("is_hacked"):
                 print(f"   🚨 SITE APPEARS TO BE HACKED!")
-                for indicator in results["security"]["hack_indicators"][:2]:
+                for indicator in sec.get("hack_indicators", [])[:2]:
                     print(f"     • {indicator}")
-            if results["security"]["has_malware"]:
+            if sec.get("has_malware"):
                 print(f"   ⚠️  Malware code detected")
-            if results["security"]["has_spam_seo"]:
-                print(f"   ⚠️  Spam SEO injection detected: {len(results['security']['spam_indicators'])} indicators")
+            if sec.get("has_spam_seo"):
+                print(f"   ⚠️  Spam SEO injection detected: {len(sec.get('spam_indicators', []))} indicators")
         
-        # API Keys expuestas (NUEVO - Fase 1)
-        if results["security"].get("has_exposed_keys"):
+        # API Keys expuestas
+        if sec.get("has_exposed_keys"):
             print(f"\n🚨 API KEYS / TOKENS EXPOSED IN CODE (CRITICAL):")
-            for key_info in results["security"]["exposed_keys"][:5]:
+            for key_info in sec.get("exposed_keys", [])[:5]:
                 print(f"   🚨 {key_info}")
-                # API Keys públicas (informativo)
-        if results["security"].get("has_public_keys"):
+        # API Keys públicas (informativo)
+        if sec.get("has_public_keys"):
             print(f"\n\u2139\ufe0f  PUBLIC API KEYS IN CODE (informational):")
-            for key_info in results["security"]["public_keys"][:5]:
+            for key_info in sec.get("public_keys", [])[:5]:
                 print(f"   - {key_info}")
-                # Comentarios sospechosos (NUEVO - Fase 1)
-        if results["security"].get("has_suspicious_comments"):
+        # Comentarios sospechosos
+        if sec.get("has_suspicious_comments"):
             print(f"\n⚠️  SUSPICIOUS COMMENTS IN HTML:")
-            for comment in results["security"]["suspicious_comments"][:3]:
+            for comment in sec.get("suspicious_comments", [])[:3]:
                 print(f"   - {comment}")
         
         # SSL / Certificate
-        ssl_data = results["ssl"]
+        ssl_data = results.get("ssl", {})
         if ssl_data.get("has_https") and ssl_data.get("has_valid_certificate"):
             cert = ssl_data.get("certificate", {})
             print(f"\n\U0001f512 SSL CERTIFICATE: \u2705 Valid")
@@ -390,10 +400,10 @@ class WebScanner:
                 print(f"   Expires: {cert['expires']} ({days} days remaining)")
         elif ssl_data.get("has_https"):
             print(f"\n\U0001f512 SSL CERTIFICATE: \u26a0\ufe0f  Problem detected")
-        else:
+        elif ssl_data:
             print(f"\n\U0001f512 SSL CERTIFICATE: \U0001f534 Site not using HTTPS")
         
-        if ssl_data["issues"]:
+        if ssl_data.get("issues"):
             for issue in ssl_data["issues"][:3]:
                 print(f"   \U0001f534 {issue}")
         
@@ -403,69 +413,77 @@ class WebScanner:
                 print(f"   - {header}")
         
         # SEO
-        if results["seo"]["issues"]:
-            print(f"\n📈 SEO ISSUES ({len(results['seo']['issues'])}):")
-            for issue in results["seo"]["issues"][:5]:
+        seo = results.get("seo", {})
+        if seo.get("issues"):
+            print(f"\n📈 SEO ISSUES ({len(seo['issues'])}):")
+            for issue in seo["issues"][:5]:
                 print(f"   - {issue}")
         
         # CMS
-        if results["cms"]["is_wordpress"]:
+        cms = results.get("cms", {})
+        if cms.get("is_wordpress"):
             print(f"\n🔧 CMS DETECTED:")
-            print(f"   - WordPress {results['cms']['version'] or 'version unknown'}")
-            if results["cms"]["is_outdated"]:
+            print(f"   - WordPress {cms.get('version') or 'version unknown'}")
+            if cms.get("is_outdated"):
                 print(f"   ⚠️  WordPress version is OUTDATED")
-            if results["cms"]["plugins_detected"]:
-                print(f"   - Plugins detected: {len(results['cms']['plugins_detected'])}")
+            if cms.get("plugins_detected"):
+                print(f"   - Plugins detected: {len(cms['plugins_detected'])}")
         
         # Información sensible (Fase 2)
         if results.get("sensitive_info"):
             sensitive = results["sensitive_info"]
             
-            if "sensitive_files" in sensitive and sensitive["sensitive_files"]["accessible_files"]:
+            sf = sensitive.get("sensitive_files", {})
+            if sf.get("accessible_files"):
                 print(f"\n🚨 SENSITIVE FILES EXPOSED (Phase 2):")
-                for file_info in sensitive["sensitive_files"]["sensitive_files"]:
+                for file_info in sf.get("sensitive_files", []):
                     print(f"   🚨 {file_info['file']} ({file_info['size']} bytes)")
-                if sensitive["sensitive_files"]["accessible_files"]:
-                    other_files = [f for f in sensitive["sensitive_files"]["accessible_files"] 
-                                   if not any(f == sf["file"] for sf in sensitive["sensitive_files"]["sensitive_files"])]
-                    if other_files:
-                        print(f"   ⚠️  Other accessible files: {', '.join(other_files[:3])}")
+                other_files = [f for f in sf["accessible_files"] 
+                               if not any(f == sfi["file"] for sfi in sf.get("sensitive_files", []))]
+                if other_files:
+                    print(f"   ⚠️  Other accessible files: {', '.join(other_files[:3])}")
             
-            if "directory_listing" in sensitive and sensitive["directory_listing"]["exposed_directories"]:
+            dl = sensitive.get("directory_listing", {})
+            if dl.get("exposed_directories"):
                 print(f"\n⚠️  DIRECTORY LISTING ENABLED:")
-                for dir_info in sensitive["directory_listing"]["exposed_directories"]:
+                for dir_info in dl["exposed_directories"]:
                     print(f"   - /{dir_info['directory']}/ ({dir_info['file_count']} files)")
             
-            if "install_files" in sensitive and sensitive["install_files"]["install_files_found"]:
+            inst = sensitive.get("install_files", {})
+            if inst.get("install_files_found"):
                 print(f"\n🚨 INSTALLATION FILES FOUND (CRITICAL):")
-                for install in sensitive["install_files"]["install_files_found"]:
+                for install in inst["install_files_found"]:
                     print(f"   🚨 {install['file']} - Allows site reinstallation!")
             
-            if "admin_panels" in sensitive and sensitive["admin_panels"]["accessible_panels"]:
+            ap = sensitive.get("admin_panels", {})
+            if ap.get("accessible_panels"):
                 print(f"\n⚠️  ADMIN PANELS ACCESSIBLE:")
-                for panel in sensitive["admin_panels"]["accessible_panels"][:5]:
+                for panel in ap["accessible_panels"][:5]:
                     print(f"   - {panel['panel']} (HTTP {panel['status']})")
             
-            if "log_files" in sensitive and sensitive["log_files"]["exposed_logs"]:
+            lf = sensitive.get("log_files", {})
+            if lf.get("exposed_logs"):
                 print(f"\n🚨 LOG FILES EXPOSED:")
-                for log in sensitive["log_files"]["exposed_logs"]:
+                for log in lf["exposed_logs"]:
                     print(f"   🚨 {log['file']} ({log['size']} bytes) - May contain sensitive info")
             
-            if "robots_analysis" in sensitive and sensitive["robots_analysis"]["accessible_disallowed"]:
+            ra = sensitive.get("robots_analysis", {})
+            if ra.get("accessible_disallowed"):
                 print(f"\n⚠️  ROBOTS.TXT ANALYSIS:")
-                print(f"   Disallowed paths found: {len(sensitive['robots_analysis']['disallowed_paths'])}")
-                print(f"   ⚠️  Accessible disallowed paths: {len(sensitive['robots_analysis']['accessible_disallowed'])}")
-                for path_info in sensitive["robots_analysis"]["accessible_disallowed"][:3]:
+                print(f"   Disallowed paths found: {len(ra.get('disallowed_paths', []))}")
+                print(f"   ⚠️  Accessible disallowed paths: {len(ra['accessible_disallowed'])}")
+                for path_info in ra["accessible_disallowed"][:3]:
                     print(f"     - {path_info['path']}")
         
         # Placeholder
-        if results["placeholder"]["has_placeholder"]:
+        placeholder = results.get("placeholder", {})
+        if placeholder.get("has_placeholder"):
             print(f"\n📝 PLACEHOLDER CONTENT:")
-            print(f"   - Placeholder texts: {len(results['placeholder']['placeholder_texts'])}")
-            print(f"   - Placeholder images: {len(results['placeholder']['placeholder_images'])}")
+            print(f"   - Placeholder texts: {len(placeholder.get('placeholder_texts', []))}")
+            print(f"   - Placeholder images: {len(placeholder.get('placeholder_images', []))}")
         
-        if results["placeholder"]["is_copyright_outdated"]:
-            print(f"   - Outdated copyright: {results['placeholder']['copyright_year']}")
+        if placeholder.get("is_copyright_outdated"):
+            print(f"   - Outdated copyright: {placeholder.get('copyright_year')}")
         
         print("\n" + "="*70)
 
