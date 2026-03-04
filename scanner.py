@@ -181,7 +181,7 @@ class WebScanner:
         start_time = time.time()
         
         # 1. Fetch URL
-        print(f"🔍 Fetching {url}...")
+        print(f"  Conectando a {url}...")
         fetch_result = self.fetch_url(url)
         scan_result["fetch_info"] = {
             "success": fetch_result["success"],
@@ -203,21 +203,21 @@ class WebScanner:
         final_url = fetch_result["final_url"]
         
         # 1b. Detectar modo mantenimiento
-        print("  ✓ Checking maintenance mode...")
+        print("  > Verificando modo mantenimiento...")
         scan_result["results"]["maintenance_mode"] = self._detect_maintenance_mode(
             fetch_result["status_code"], html_content
         )
         
         # 2. Detectar errores PHP
-        print("  ✓ Checking PHP errors...")
+        print("  > Verificando errores PHP...")
         scan_result["results"]["php_errors"] = self.php_detector.detect(html_content, final_url)
         
         # 3. Detectar hackeos y spam
-        print("  ✓ Checking security threats...")
+        print("  > Verificando amenazas de seguridad...")
         scan_result["results"]["security"] = self.hack_detector.detect(html_content, final_url)
         
         # 4. Verificar SSL
-        print("  ✓ Checking SSL...")
+        print("  > Verificando SSL...")
         scan_result["results"]["ssl"] = self.ssl_seo_detector.detect_ssl_issues(
             final_url, 
             fetch_result["headers"]
@@ -231,11 +231,11 @@ class WebScanner:
                 scan_result["results"]["ssl"]["severity"] = "medium"
         
         # 5. Análisis SEO
-        print("  ✓ Analyzing SEO...")
+        print("  > Analizando SEO...")
         scan_result["results"]["seo"] = self.ssl_seo_detector.analyze_seo(html_content, final_url)
         
         # 6. Detectar CMS
-        print("  ✓ Detecting CMS...")
+        print("  > Detectando CMS...")
         cms_results = self.cms_detector.detect_all(html_content, final_url)
         scan_result["results"]["cms"] = cms_results["wordpress"]
         scan_result["results"]["cms"]["other_cms"] = cms_results["other_cms"]
@@ -244,7 +244,7 @@ class WebScanner:
         
         # 7. FASE 2 - Detectar información sensible (opcional, más intensivo)
         if self.enable_phase2:
-            print("  ✓ Scanning for sensitive files (Phase 2)...")
+            print("  > Escaneando archivos sensibles (Fase 2)...")
             sensitive_results = self.sensitive_detector.detect_all(final_url)
             scan_result["results"]["sensitive_info"] = sensitive_results
         
@@ -301,104 +301,105 @@ class WebScanner:
     def print_summary(self, scan_result: Dict):
         """Imprime un resumen legible de los resultados"""
         print("\n" + "="*70)
-        print(f"📊 SCAN SUMMARY: {scan_result['url']}")
+        print(f"  RESUMEN DEL ESCANEO: {scan_result['url']}")
         print("="*70)
         
         # Estado general
-        severity_emoji = {
-            "none": "✅",
-            "low": "⚠️",
-            "medium": "⚠️",
-            "high": "🔴",
-            "critical": "🚨"
+        severity_label = {
+            "none": "[OK]",
+            "low": "[BAJO]",
+            "medium": "[MEDIO]",
+            "high": "[ALTO]",
+            "critical": "[CRITICO]"
         }
         
-        emoji = severity_emoji.get(scan_result["overall_severity"], "❓")
-        print(f"\n{emoji} Overall Severity: {scan_result['overall_severity'].upper()}")
-        print(f"⏱️  Scan Duration: {scan_result['scan_duration']}s")
-        print(f"📈 Response Time: {scan_result['fetch_info']['response_time']}s")
-        print(f"🔢 HTTP Status: {scan_result['fetch_info']['status_code']}")
+        label = severity_label.get(scan_result["overall_severity"], "[?]")
+        print(f"\n  Severidad general: {label}")
+        print(f"  Duracion del escaneo: {scan_result['scan_duration']}s")
+        print(f"  Tiempo de respuesta: {scan_result['fetch_info']['response_time']}s")
+        print(f"  Estado HTTP: {scan_result['fetch_info']['status_code']}")
         
         # Resumen de issues
         summary = scan_result["issues_summary"]
         if summary["total"] > 0:
-            print(f"\n🔍 Issues Found: {summary['total']}")
+            print(f"\n  Problemas encontrados: {summary['total']}")
             if summary["critical"] > 0:
-                print(f"   🚨 Critical: {summary['critical']}")
+                print(f"   [CRITICO] {summary['critical']}")
             if summary["high"] > 0:
-                print(f"   🔴 High: {summary['high']}")
+                print(f"   [ALTO]    {summary['high']}")
             if summary["medium"] > 0:
-                print(f"   ⚠️  Medium: {summary['medium']}")
+                print(f"   [MEDIO]   {summary['medium']}")
             if summary["low"] > 0:
-                print(f"   ℹ️  Low: {summary['low']}")
+                print(f"   [BAJO]    {summary['low']}")
         else:
-            print("\n✅ No critical issues found")
+            print("\n  No se encontraron problemas criticos.")
         
         # Detalles por categoría
         results = scan_result["results"]
         
         # Si el fetch falló, los dicts estarán vacíos - salir temprano
         if not scan_result["fetch_info"].get("success"):
-            error_msg = scan_result["fetch_info"].get("error", "Unknown error")
-            print(f"\n🚨 FETCH FAILED: {error_msg}")
-            print(f"   Cannot analyze site - connection failed.")
+            error_msg = scan_result["fetch_info"].get("error", "Error desconocido")
+            print(f"\n  [CRITICO] CONEXION FALLIDA: {error_msg}")
+            print(f"   No se puede analizar el sitio - la conexion ha fallado.")
             
             suggestions = scan_result.get("suggestions", [])
             if suggestions:
                 print(f"\n{'─'*70}")
-                print(f"💡 RECOMMENDATIONS ({len(suggestions)}):")
+                print(f"  RECOMENDACIONES ({len(suggestions)}):")
                 print(f"{'─'*70}")
                 for sug in suggestions:
-                    icon = {"critical": "🚨", "high": "🔴", "medium": "⚠️", "low": "ℹ️"}.get(sug.get("priority", ""), "•")
-                    print(f"   {icon} {sug['text']}")
+                    p = sug.get("priority", "")
+                    tag = {"critical": "[CRITICO]", "high": "[ALTO]", "medium": "[MEDIO]", "low": "[BAJO]"}.get(p, "-")
+                    print(f"   {tag} {sug['text']}")
             
             print("\n" + "="*70)
             return
         
         # Maintenance Mode
         if results.get("maintenance_mode", {}).get("is_maintenance"):
-            print(f"\n\U0001f6a7 MAINTENANCE MODE DETECTED:")
+            print(f"\n  MODO MANTENIMIENTO DETECTADO:")
             for indicator in results["maintenance_mode"]["indicators"]:
                 print(f"   - {indicator}")
-            print(f"   ⚠️  Results may be incomplete - site is not serving normal content")
+            print(f"   Los resultados pueden ser incompletos - el sitio no sirve contenido normal.")
         
         # PHP Errors
         php = results.get("php_errors", {})
         if php.get("has_errors"):
-            print(f"\n🔴 PHP/DATABASE ERRORS:")
+            print(f"\n  ERRORES PHP/BASE DE DATOS:")
             if php.get("php_errors"):
-                print(f"   - PHP errors found: {len(php['php_errors'])}")
+                print(f"   - Errores PHP encontrados: {len(php['php_errors'])}")
                 for error in php["php_errors"][:2]:
-                    print(f"     • {error[:80]}...")
+                    print(f"     > {error[:80]}...")
             if php.get("db_errors"):
-                print(f"   - Database errors found: {len(php['db_errors'])}")
+                print(f"   - Errores de base de datos: {len(php['db_errors'])}")
         
         # Security
         sec = results.get("security", {})
         if sec.get("is_hacked") or sec.get("has_spam_seo") or sec.get("has_malware"):
-            print(f"\n🚨 SECURITY ISSUES:")
+            print(f"\n  PROBLEMAS DE SEGURIDAD:")
             if sec.get("is_hacked"):
-                print(f"   🚨 SITE APPEARS TO BE HACKED!")
+                print(f"   [CRITICO] El sitio parece estar hackeado.")
                 for indicator in sec.get("hack_indicators", [])[:2]:
-                    print(f"     • {indicator}")
+                    print(f"     > {indicator}")
             if sec.get("has_malware"):
-                print(f"   ⚠️  Malware code detected")
+                print(f"   [ALTO] Codigo malware detectado.")
             if sec.get("has_spam_seo"):
-                print(f"   ⚠️  Spam SEO injection detected: {len(sec.get('spam_indicators', []))} indicators")
+                print(f"   [ALTO] Inyeccion de spam SEO detectada: {len(sec.get('spam_indicators', []))} indicadores")
         
         # API Keys expuestas
         if sec.get("has_exposed_keys"):
-            print(f"\n🚨 API KEYS / TOKENS EXPOSED IN CODE (CRITICAL):")
+            print(f"\n  API KEYS / TOKENS EXPUESTOS EN CODIGO (CRITICO):")
             for key_info in sec.get("exposed_keys", [])[:5]:
-                print(f"   🚨 {key_info}")
+                print(f"   [CRITICO] {key_info}")
         # API Keys públicas (informativo)
         if sec.get("has_public_keys"):
-            print(f"\n\u2139\ufe0f  PUBLIC API KEYS IN CODE (informational):")
+            print(f"\n  API KEYS PUBLICAS EN CODIGO (informativo):")
             for key_info in sec.get("public_keys", [])[:5]:
                 print(f"   - {key_info}")
         # Comentarios sospechosos
         if sec.get("has_suspicious_comments"):
-            print(f"\n⚠️  SUSPICIOUS COMMENTS IN HTML:")
+            print(f"\n  COMENTARIOS SOSPECHOSOS EN HTML:")
             for comment in sec.get("suspicious_comments", [])[:3]:
                 print(f"   - {comment}")
         
@@ -406,42 +407,42 @@ class WebScanner:
         ssl_data = results.get("ssl", {})
         if ssl_data.get("has_https") and ssl_data.get("has_valid_certificate"):
             cert = ssl_data.get("certificate", {})
-            print(f"\n\U0001f512 SSL CERTIFICATE: \u2705 Valid")
+            print(f"\n  CERTIFICADO SSL: Valido")
             if cert.get("issuer"):
-                print(f"   Issuer: {cert['issuer']}")
+                print(f"   Emisor: {cert['issuer']}")
             if cert.get("expires"):
                 days = cert.get('days_remaining', '?')
-                print(f"   Expires: {cert['expires']} ({days} days remaining)")
+                print(f"   Expira: {cert['expires']} ({days} dias restantes)")
         elif ssl_data.get("has_https"):
-            print(f"\n\U0001f512 SSL CERTIFICATE: \u26a0\ufe0f  Problem detected")
+            print(f"\n  CERTIFICADO SSL: Problema detectado")
         elif ssl_data:
-            print(f"\n\U0001f512 SSL CERTIFICATE: \U0001f534 Site not using HTTPS")
+            print(f"\n  CERTIFICADO SSL: El sitio no usa HTTPS")
         
         if ssl_data.get("issues"):
             for issue in ssl_data["issues"][:3]:
-                print(f"   \U0001f534 {issue}")
+                print(f"   [!] {issue}")
         
         if ssl_data.get("missing_headers"):
-            print(f"\n\U0001f6e1\ufe0f  SECURITY HEADERS (informational):")
+            print(f"\n  CABECERAS DE SEGURIDAD (informativo):")
             for header in ssl_data["missing_headers"][:3]:
                 print(f"   - {header}")
         
         # SEO
         seo = results.get("seo", {})
         if seo.get("issues"):
-            print(f"\n📈 SEO ISSUES ({len(seo['issues'])}):")
+            print(f"\n  PROBLEMAS SEO ({len(seo['issues'])}):")
             for issue in seo["issues"][:5]:
                 print(f"   - {issue}")
         
         # CMS
         cms = results.get("cms", {})
         if cms.get("is_wordpress"):
-            print(f"\n🔧 CMS DETECTED:")
-            print(f"   - WordPress {cms.get('version') or 'version unknown'}")
+            print(f"\n  CMS DETECTADO:")
+            print(f"   - WordPress {cms.get('version') or 'version desconocida'}")
             if cms.get("is_outdated"):
-                print(f"   ⚠️  WordPress version is OUTDATED")
+                print(f"   [ALTO] La version de WordPress esta DESACTUALIZADA")
             if cms.get("plugins_detected"):
-                print(f"   - Plugins detected: {len(cms['plugins_detected'])}")
+                print(f"   - Plugins detectados: {len(cms['plugins_detected'])}")
         
         # Información sensible (Fase 2)
         if results.get("sensitive_info"):
@@ -449,68 +450,68 @@ class WebScanner:
             
             sf = sensitive.get("sensitive_files", {})
             if sf.get("accessible_files"):
-                print(f"\n🚨 SENSITIVE FILES EXPOSED (Phase 2):")
+                print(f"\n  ARCHIVOS SENSIBLES EXPUESTOS (Fase 2):")
                 for file_info in sf.get("sensitive_files", []):
-                    print(f"   🚨 {file_info['file']} ({file_info['size']} bytes)")
+                    print(f"   [CRITICO] {file_info['file']} ({file_info['size']} bytes)")
                 other_files = [f for f in sf["accessible_files"] 
                                if not any(f == sfi["file"] for sfi in sf.get("sensitive_files", []))]
                 if other_files:
-                    print(f"   ⚠️  Other accessible files: {', '.join(other_files[:3])}")
+                    print(f"   Otros archivos accesibles: {', '.join(other_files[:3])}")
             
             dl = sensitive.get("directory_listing", {})
             if dl.get("exposed_directories"):
-                print(f"\n⚠️  DIRECTORY LISTING ENABLED:")
+                print(f"\n  LISTADO DE DIRECTORIOS HABILITADO:")
                 for dir_info in dl["exposed_directories"]:
-                    print(f"   - /{dir_info['directory']}/ ({dir_info['file_count']} files)")
+                    print(f"   - /{dir_info['directory']}/ ({dir_info['file_count']} archivos)")
             
             inst = sensitive.get("install_files", {})
             if inst.get("install_files_found"):
-                print(f"\n🚨 INSTALLATION FILES FOUND (CRITICAL):")
+                print(f"\n  ARCHIVOS DE INSTALACION ENCONTRADOS (CRITICO):")
                 for install in inst["install_files_found"]:
-                    print(f"   🚨 {install['file']} - Allows site reinstallation!")
+                    print(f"   [CRITICO] {install['file']} - Permite reinstalar el sitio")
             
             ap = sensitive.get("admin_panels", {})
             if ap.get("accessible_panels"):
-                print(f"\n⚠️  ADMIN PANELS ACCESSIBLE:")
+                print(f"\n  PANELES DE ADMINISTRACION ACCESIBLES:")
                 for panel in ap["accessible_panels"][:5]:
                     print(f"   - {panel['panel']} (HTTP {panel['status']})")
             
             lf = sensitive.get("log_files", {})
             if lf.get("exposed_logs"):
-                print(f"\n🚨 LOG FILES EXPOSED:")
+                print(f"\n  ARCHIVOS DE LOG EXPUESTOS:")
                 for log in lf["exposed_logs"]:
-                    print(f"   🚨 {log['file']} ({log['size']} bytes) - May contain sensitive info")
+                    print(f"   [CRITICO] {log['file']} ({log['size']} bytes) - Puede contener info sensible")
             
             ra = sensitive.get("robots_analysis", {})
             if ra.get("accessible_disallowed"):
-                print(f"\n⚠️  ROBOTS.TXT ANALYSIS:")
-                print(f"   Disallowed paths found: {len(ra.get('disallowed_paths', []))}")
-                print(f"   ⚠️  Accessible disallowed paths: {len(ra['accessible_disallowed'])}")
+                print(f"\n  ANALISIS ROBOTS.TXT:")
+                print(f"   Rutas bloqueadas encontradas: {len(ra.get('disallowed_paths', []))}")
+                print(f"   Rutas bloqueadas pero accesibles: {len(ra['accessible_disallowed'])}")
                 for path_info in ra["accessible_disallowed"][:3]:
                     print(f"     - {path_info['path']}")
         
         # Placeholder
         placeholder = results.get("placeholder", {})
         if placeholder.get("has_placeholder"):
-            print(f"\n📝 PLACEHOLDER CONTENT:")
-            print(f"   - Placeholder texts: {len(placeholder.get('placeholder_texts', []))}")
-            print(f"   - Placeholder images: {len(placeholder.get('placeholder_images', []))}")
+            print(f"\n  CONTENIDO PLACEHOLDER:")
+            print(f"   - Textos placeholder: {len(placeholder.get('placeholder_texts', []))}")
+            print(f"   - Imagenes placeholder: {len(placeholder.get('placeholder_images', []))}")
         
         if placeholder.get("is_copyright_outdated"):
-            print(f"   - Outdated copyright: {placeholder.get('copyright_year')}")
+            print(f"   - Copyright desactualizado: {placeholder.get('copyright_year')}")
         
-        # SUGGESTIONS
+        # SUGERENCIAS
         suggestions = scan_result.get("suggestions", [])
         if suggestions:
             print(f"\n{'─'*70}")
-            print(f"💡 RECOMMENDATIONS ({len(suggestions)}):")
+            print(f"  RECOMENDACIONES ({len(suggestions)}):")
             print(f"{'─'*70}")
-            for i, sug in enumerate(suggestions, 1):
-                priority = sug.get("priority", "")
-                icon = {"critical": "🚨", "high": "🔴", "medium": "⚠️", "low": "ℹ️"}.get(priority, "•")
-                print(f"   {icon} {sug['text']}")
+            for sug in suggestions:
+                p = sug.get("priority", "")
+                tag = {"critical": "[CRITICO]", "high": "[ALTO]", "medium": "[MEDIO]", "low": "[BAJO]"}.get(p, "-")
+                print(f"   {tag} {sug['text']}")
         else:
-            print(f"\n💡 No recommendations — site looks good!")
+            print(f"\n  Sin recomendaciones - el sitio se ve bien.")
         
         print("\n" + "="*70)
     
@@ -519,7 +520,7 @@ class WebScanner:
         Genera sugerencias accionables priorizadas a partir de todos los resultados.
         Cada sugerencia es un dict: {priority, category, text}
         Priority: critical > high > medium > low
-        Máximo ~10 sugerencias, las más importantes primero.
+        Maximo ~10 sugerencias, las mas importantes primero.
         """
         suggestions = []
         results = scan_result.get("results", {})
@@ -528,53 +529,53 @@ class WebScanner:
             suggestions.append({
                 "priority": "critical",
                 "category": "connectivity",
-                "text": "The website is unreachable. Verify the domain is correct, the server is online, and DNS is properly configured."
+                "text": "El sitio web no es accesible. Verifica que el dominio sea correcto, que el servidor este en linea y que el DNS este bien configurado."
             })
             return suggestions
         
-        # ── MAINTENANCE MODE ──
+        # ── MODO MANTENIMIENTO ──
         maint = results.get("maintenance_mode", {})
         if maint.get("is_maintenance"):
             suggestions.append({
                 "priority": "high",
                 "category": "maintenance",
-                "text": "Site is in maintenance mode — visitors cannot access content. Disable maintenance mode or set an estimated return time."
+                "text": "El sitio esta en modo mantenimiento, los visitantes no pueden acceder al contenido. Desactiva el modo mantenimiento o indica una fecha estimada de retorno."
             })
         
-        # ── SECURITY: HACKED / MALWARE / SPAM ──
+        # ── SEGURIDAD: HACKEO / MALWARE / SPAM ──
         sec = results.get("security", {})
         if sec.get("is_hacked"):
             suggestions.append({
                 "priority": "critical",
                 "category": "security",
-                "text": "Site shows signs of being hacked. Immediately: restore from a clean backup, change all passwords, update all software, and audit server access logs."
+                "text": "El sitio muestra signos de estar hackeado. Accion inmediata: restaurar desde un backup limpio, cambiar todas las contrasenas, actualizar todo el software y revisar los logs de acceso."
             })
         if sec.get("has_malware"):
             suggestions.append({
                 "priority": "critical",
                 "category": "security",
-                "text": "Malware code detected in the page source. Scan the server with a security tool (e.g. Wordfence, Sucuri) and remove all malicious scripts."
+                "text": "Se detecto codigo malware en el codigo fuente. Escanea el servidor con una herramienta de seguridad (ej. Wordfence, Sucuri) y elimina todos los scripts maliciosos."
             })
         if sec.get("has_spam_seo"):
             suggestions.append({
                 "priority": "critical",
                 "category": "security",
-                "text": "SEO spam injected into the site (pharma/casino links). Clean the database and templates, then check for unauthorized admin users."
+                "text": "Se detecto spam SEO inyectado en el sitio (enlaces de farmacia/casino). Limpia la base de datos y las plantillas, y verifica que no haya usuarios admin no autorizados."
             })
         if sec.get("has_exposed_keys"):
             suggestions.append({
                 "priority": "critical",
                 "category": "security",
-                "text": "Private API keys or tokens are exposed in the HTML source. Revoke them immediately, generate new ones, and move them to server-side environment variables."
+                "text": "Claves API o tokens privados estan expuestos en el HTML. Revocalos inmediatamente, genera nuevos y muevalos a variables de entorno del servidor."
             })
         if sec.get("has_suspicious_comments"):
             suggestions.append({
                 "priority": "medium",
                 "category": "security",
-                "text": "Suspicious HTML comments found (possible debug info or backdoor markers). Review and remove any unnecessary comments from production code."
+                "text": "Se encontraron comentarios HTML sospechosos (posible info de debug o marcadores de backdoor). Revisa y elimina comentarios innecesarios del codigo en produccion."
             })
         
-        # ── PHP / DB ERRORS ──
+        # ── ERRORES PHP / DB ──
         php = results.get("php_errors", {})
         if php.get("has_errors"):
             php_list = php.get("php_errors", [])
@@ -583,13 +584,13 @@ class WebScanner:
                 suggestions.append({
                     "priority": "critical",
                     "category": "errors",
-                    "text": "Database errors are visible to visitors. Check the DB connection credentials, ensure the database server is running, and set display_errors = Off in php.ini."
+                    "text": "Errores de base de datos visibles para los visitantes. Verifica las credenciales de conexion, asegurate de que el servidor DB este activo y configura display_errors = Off en php.ini."
                 })
             if php_list:
                 suggestions.append({
                     "priority": "high",
                     "category": "errors",
-                    "text": f"PHP errors are exposed to visitors ({len(php_list)} found). Set display_errors = Off in production and review the error log to fix the underlying issues."
+                    "text": f"Errores PHP expuestos a visitantes ({len(php_list)} encontrados). Configura display_errors = Off en produccion y revisa el log de errores para corregir las causas."
                 })
         
         # ── SSL / HTTPS ──
@@ -598,13 +599,13 @@ class WebScanner:
             suggestions.append({
                 "priority": "high",
                 "category": "ssl",
-                "text": "Site is not using HTTPS. Install an SSL certificate (free via Let's Encrypt) and redirect all HTTP traffic to HTTPS."
+                "text": "El sitio no usa HTTPS. Instala un certificado SSL (gratuito con Let's Encrypt) y redirige todo el trafico HTTP a HTTPS."
             })
         elif not ssl_data.get("has_valid_certificate"):
             suggestions.append({
                 "priority": "high",
                 "category": "ssl",
-                "text": "SSL certificate has a problem (invalid, self-signed, or hostname mismatch). Renew or replace the certificate."
+                "text": "El certificado SSL tiene un problema (invalido, autofirmado o no coincide con el dominio). Renueva o reemplaza el certificado."
             })
         else:
             cert = ssl_data.get("certificate", {})
@@ -613,20 +614,20 @@ class WebScanner:
                 suggestions.append({
                     "priority": "critical",
                     "category": "ssl",
-                    "text": f"SSL certificate EXPIRED {abs(days)} days ago. Renew it immediately — browsers are showing security warnings to all visitors."
+                    "text": f"El certificado SSL EXPIRO hace {abs(days)} dias. Renovalo inmediatamente, los navegadores estan mostrando advertencias de seguridad a todos los visitantes."
                 })
             elif days is not None and days < 30:
                 suggestions.append({
                     "priority": "medium",
                     "category": "ssl",
-                    "text": f"SSL certificate expires in {days} days ({cert.get('expires')}). Renew soon or enable auto-renewal to avoid downtime."
+                    "text": f"El certificado SSL expira en {days} dias ({cert.get('expires')}). Renuevalo pronto o activa la renovacion automatica para evitar caidas."
                 })
         
         if ssl_data.get("has_mixed_content"):
             suggestions.append({
                 "priority": "medium",
                 "category": "ssl",
-                "text": "Mixed content detected: some resources load over HTTP on an HTTPS page. Update all asset URLs to use HTTPS or protocol-relative paths."
+                "text": "Contenido mixto detectado: algunos recursos se cargan por HTTP en una pagina HTTPS. Actualiza todas las URLs de recursos para usar HTTPS."
             })
         
         missing_hdrs = ssl_data.get("missing_headers", [])
@@ -635,10 +636,10 @@ class WebScanner:
             suggestions.append({
                 "priority": "low",
                 "category": "headers",
-                "text": f"Missing security headers: {header_names}. Configure them in your web server to improve defense against clickjacking and MIME sniffing."
+                "text": f"Faltan cabeceras de seguridad: {header_names}. Configuralas en tu servidor web para mejorar la proteccion contra clickjacking y MIME sniffing."
             })
         
-        # ── SENSITIVE FILES (Phase 2) ──
+        # ── ARCHIVOS SENSIBLES (Fase 2) ──
         sensitive = results.get("sensitive_info", {})
         
         inst = sensitive.get("install_files", {})
@@ -647,7 +648,7 @@ class WebScanner:
             suggestions.append({
                 "priority": "critical",
                 "category": "sensitive",
-                "text": f"Installation files found and accessible ({files}). Delete them immediately — they can be used to reinstall/reset your site."
+                "text": f"Archivos de instalacion encontrados y accesibles ({files}). Eliminalos inmediatamente, pueden usarse para reinstalar/resetear tu sitio."
             })
         
         sf = sensitive.get("sensitive_files", {})
@@ -656,7 +657,7 @@ class WebScanner:
             suggestions.append({
                 "priority": "critical",
                 "category": "sensitive",
-                "text": f"Sensitive files exposed ({files}). Block public access via .htaccess or server config — they may contain passwords or config data."
+                "text": f"Archivos sensibles expuestos ({files}). Bloquea el acceso publico via .htaccess o configuracion del servidor, pueden contener contrasenas o datos de configuracion."
             })
         
         lf = sensitive.get("log_files", {})
@@ -664,7 +665,7 @@ class WebScanner:
             suggestions.append({
                 "priority": "high",
                 "category": "sensitive",
-                "text": "Log files are publicly accessible. Move them outside the web root or block access — they can reveal server paths, errors, and user data."
+                "text": "Archivos de log accesibles publicamente. Muevalos fuera del directorio web o bloquea el acceso, pueden revelar rutas del servidor, errores y datos de usuarios."
             })
         
         dl = sensitive.get("directory_listing", {})
@@ -673,7 +674,7 @@ class WebScanner:
             suggestions.append({
                 "priority": "high",
                 "category": "sensitive",
-                "text": f"Directory listing is enabled on {count} folder(s). Disable it with 'Options -Indexes' in .htaccess to prevent exposing your file structure."
+                "text": f"Listado de directorios habilitado en {count} carpeta(s). Desactivalo con 'Options -Indexes' en .htaccess para no exponer la estructura de archivos."
             })
         
         ap = sensitive.get("admin_panels", {})
@@ -683,7 +684,7 @@ class WebScanner:
             suggestions.append({
                 "priority": "medium",
                 "category": "sensitive",
-                "text": f"Admin panel(s) accessible ({panel_names}). Restrict access by IP, add 2FA, or move to a custom URL to reduce brute-force risk."
+                "text": f"Panel(es) de admin accesible(s) ({panel_names}). Restringe el acceso por IP, agrega 2FA o cambia la URL para reducir ataques de fuerza bruta."
             })
         
         # ── CMS ──
@@ -693,52 +694,51 @@ class WebScanner:
                 suggestions.append({
                     "priority": "high",
                     "category": "cms",
-                    "text": f"WordPress version {cms.get('version', '?')} is outdated. Update to the latest version to patch known security vulnerabilities."
+                    "text": f"WordPress version {cms.get('version', '?')} esta desactualizada. Actualiza a la ultima version para corregir vulnerabilidades de seguridad conocidas."
                 })
-            outdated_plugins = [p for p in cms.get("plugins_detected", []) if isinstance(p, dict) and p.get("outdated")]
             plugin_count = len(cms.get("plugins_detected", []))
             if plugin_count > 15:
                 suggestions.append({
                     "priority": "medium",
                     "category": "cms",
-                    "text": f"{plugin_count} plugins detected. Review and deactivate unused plugins to reduce attack surface and improve performance."
+                    "text": f"{plugin_count} plugins detectados. Revisa y desactiva los plugins que no uses para reducir la superficie de ataque y mejorar el rendimiento."
                 })
         
         # ── SEO ──
         seo = results.get("seo", {})
         seo_issues = seo.get("issues", [])
         if seo_issues:
-            # Group & prioritize SEO suggestions
             if any("Missing title" in i or "Title tag is empty" in i for i in seo_issues):
                 suggestions.append({
                     "priority": "high",
                     "category": "seo",
-                    "text": "The page is missing a <title> tag. Add a descriptive, keyword-rich title (50-60 characters) — this is critical for search engine ranking."
+                    "text": "La pagina no tiene etiqueta <title>. Agrega un titulo descriptivo con palabras clave (50-60 caracteres), es critico para el posicionamiento en buscadores."
                 })
             if any("Missing meta description" in i for i in seo_issues):
                 suggestions.append({
                     "priority": "medium",
                     "category": "seo",
-                    "text": "Missing meta description. Add a compelling description (120-160 characters) that summarizes the page content for search results."
+                    "text": "Falta la meta description. Agrega una descripcion atractiva (120-160 caracteres) que resuma el contenido de la pagina para los resultados de busqueda."
                 })
             if any("Missing H1" in i for i in seo_issues):
                 suggestions.append({
                     "priority": "medium",
                     "category": "seo",
-                    "text": "No H1 heading found. Add a single, descriptive H1 tag — search engines use it to understand the main topic of the page."
+                    "text": "No se encontro encabezado H1. Agrega un unico H1 descriptivo, los buscadores lo usan para entender el tema principal de la pagina."
                 })
             if any("Multiple H1" in i for i in seo_issues):
                 suggestions.append({
                     "priority": "low",
                     "category": "seo",
-                    "text": "Multiple H1 tags detected. Use a single H1 for the main heading and H2-H6 for subheadings to improve content hierarchy."
+                    "text": "Se detectaron multiples etiquetas H1. Usa un solo H1 para el titulo principal y H2-H6 para subtitulos, mejora la jerarquia del contenido."
                 })
             alt_issue = next((i for i in seo_issues if "images missing alt" in i), None)
             if alt_issue:
+                pct = alt_issue.split(')')[0].split('(')[-1] if '(' in alt_issue else 'algunas'
                 suggestions.append({
                     "priority": "low",
                     "category": "seo",
-                    "text": f"Images without alt text: {alt_issue.split(')')[0].split('(')[-1] if '(' in alt_issue else 'some'}. Add descriptive alt attributes for accessibility and SEO."
+                    "text": f"Imagenes sin texto alt: {pct}. Agrega atributos alt descriptivos para mejorar la accesibilidad y el SEO."
                 })
         
         # ── PLACEHOLDER / COPYRIGHT ──
@@ -747,61 +747,60 @@ class WebScanner:
             suggestions.append({
                 "priority": "medium",
                 "category": "content",
-                "text": "Placeholder/dummy content detected. Replace it with real content before it affects your professional image and SEO."
+                "text": "Se detecto contenido placeholder/de ejemplo. Reemplazalo con contenido real antes de que afecte tu imagen profesional y tu SEO."
             })
         if placeholder.get("is_copyright_outdated"):
             year = placeholder.get("copyright_year", "?")
             suggestions.append({
                 "priority": "low",
                 "category": "content",
-                "text": f"Copyright year is outdated ({year}). Update it to the current year to show the site is actively maintained."
+                "text": f"El ano del copyright esta desactualizado ({year}). Actualizalo al ano actual para mostrar que el sitio se mantiene activo."
             })
         
-        # ── PUBLIC API KEYS (informational) ──
+        # ── API KEYS PUBLICAS (informativo) ──
         if sec.get("has_public_keys"):
             suggestions.append({
                 "priority": "low",
                 "category": "security",
-                "text": "Public API keys found in source (e.g. Google Maps). While not secret, consider restricting them by referrer/IP in the provider's console."
+                "text": "Se encontraron API keys publicas en el codigo (ej. Google Maps). Aunque no son secretas, considera restringirlas por referrer/IP en la consola del proveedor."
             })
         
-        # ── RESPONSE TIME ──
+        # ── TIEMPO DE RESPUESTA ──
         resp_time = scan_result.get("fetch_info", {}).get("response_time", 0)
         if resp_time > 5:
             suggestions.append({
                 "priority": "medium",
                 "category": "performance",
-                "text": f"Response time is slow ({resp_time}s). Investigate server performance, enable caching, optimize images, and consider a CDN."
+                "text": f"El tiempo de respuesta es lento ({resp_time}s). Investiga el rendimiento del servidor, activa cache, optimiza imagenes y considera usar un CDN."
             })
         elif resp_time > 3:
             suggestions.append({
                 "priority": "low",
                 "category": "performance",
-                "text": f"Response time is {resp_time}s. Consider enabling server-side caching and image optimization to improve loading speed."
+                "text": f"El tiempo de respuesta es de {resp_time}s. Considera activar cache del servidor y optimizar imagenes para mejorar la velocidad de carga."
             })
         
-        # Sort by priority (critical first)
+        # Ordenar por prioridad (critico primero)
         priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         suggestions.sort(key=lambda s: priority_order.get(s["priority"], 99))
         
-        # Limit to top 10 most important
+        # Limitar a las 10 mas importantes
         return suggestions[:10]
 
 
 def test_real_url():
     """Test con una URL real"""
-    print("🧪 Testing with real URLs...\n")
+    print("Probando con URLs reales...\n")
     
     scanner = WebScanner(timeout=15)
     
-    # URLs de prueba (podemos usar ejemplo.com o test.com)
     test_urls = [
-        "httpbin.org/html",  # URL de prueba que responde con HTML
+        "httpbin.org/html",
     ]
     
     for url in test_urls:
         print(f"\n{'='*70}")
-        print(f"Testing: {url}")
+        print(f"Escaneando: {url}")
         print('='*70)
         
         result = scanner.scan(url)
