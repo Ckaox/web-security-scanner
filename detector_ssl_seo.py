@@ -23,6 +23,7 @@ class SSLSEODetector:
         results = {
             "has_https": False,
             "has_mixed_content": False,
+            "missing_headers": [],
             "issues": [],
             "severity": "none"
         }
@@ -46,10 +47,14 @@ class SSLSEODetector:
             
             for header, message in security_headers.items():
                 if header not in response_headers:
-                    results["issues"].append(message)
+                    results["missing_headers"].append(message)
         
+        # Solo subir severidad si hay problemas reales (no HTTPS)
+        # Missing headers son informativos, no un problema crítico
         if results["issues"] and results["severity"] == "none":
-            results["severity"] = "medium"
+            results["severity"] = "high"
+        elif results["missing_headers"] and results["severity"] == "none":
+            results["severity"] = "low"
         
         return results
     
@@ -104,10 +109,10 @@ class SSLSEODetector:
                 
                 if results["title_length"] == 0:
                     results["issues"].append("Title tag is empty")
-                elif results["title_length"] < 30:
+                elif results["title_length"] < 10:
                     results["issues"].append(f"Title too short ({results['title_length']} chars)")
                 elif results["title_length"] > 60:
-                    results["issues"].append(f"Title too long ({results['title_length']} chars)")
+                    results["issues"].append(f"Title too long ({results['title_length']} chars, recommended: max 60)")
                 
                 # Títulos genéricos
                 generic_titles = ['untitled', 'home', 'welcome', 'new page', 'index']
@@ -165,9 +170,12 @@ class SSLSEODetector:
             results["has_open_graph"] = len(og_tags) > 0
             
             # Determinar severidad
-            critical_issues = ['Missing title tag', 'Title tag is empty', 'Missing H1 tag']
-            if any(issue in results["issues"] for issue in critical_issues):
+            critical_seo_issues = ['Missing title tag', 'Title tag is empty']
+            medium_seo_issues = ['Missing H1 tag', 'Missing meta description']
+            if any(issue in results["issues"] for issue in critical_seo_issues):
                 results["severity"] = "high"
+            elif any(issue in results["issues"] for issue in medium_seo_issues):
+                results["severity"] = "medium"
             elif len(results["issues"]) >= 3:
                 results["severity"] = "medium"
             elif len(results["issues"]) > 0:

@@ -32,19 +32,13 @@ class CMSPlaceholderDetector:
         'Font Awesome': r'font-awesome[/-]([\d.]+)',
     }
     
-    # Patrones de contenido placeholder
+    # Patrones de contenido placeholder (solo texto visible)
     PLACEHOLDER_PATTERNS = [
         r'lorem\s+ipsum',
         r'dolor\s+sit\s+amet',
         r'consectetur\s+adipiscing',
-        r'coming\s+soon',
-        r'under\s+construction',
-        r'website\s+under\s+construction',
-        r'site\s+under\s+maintenance',
         r'placeholder\s+(?:text|image|content)',
-        r'this\s+is\s+(?:a\s+)?(?:test|sample|demo)',
-        r'default\s+(?:page|content|text)',
-        r'example\.(?:com|jpg|png)',
+        r'this\s+is\s+(?:a\s+)?(?:test|sample|demo)\s+(?:page|site|website)',
     ]
     
     # URLs placeholder comunes
@@ -174,9 +168,16 @@ class CMSPlaceholderDetector:
         }
         
         try:
-            # Buscar texto placeholder
+            soup = BeautifulSoup(html_content, 'lxml')
+            
+            # Extraer solo el texto visible (sin scripts, styles, ni atributos HTML)
+            for script_or_style in soup(['script', 'style']):
+                script_or_style.decompose()
+            visible_text = soup.get_text(separator=' ')
+            
+            # Buscar texto placeholder solo en contenido visible
             for regex in self.placeholder_regex:
-                matches = regex.findall(html_content)
+                matches = regex.findall(visible_text)
                 if matches:
                     result["has_placeholder"] = True
                     for match in matches[:3]:
@@ -184,8 +185,8 @@ class CMSPlaceholderDetector:
                             result["placeholder_texts"].append(match[:100])
             
             # Buscar imágenes placeholder
-            soup = BeautifulSoup(html_content, 'lxml')
-            images = soup.find_all('img')
+            soup2 = BeautifulSoup(html_content, 'lxml')  # Re-parse since we decomposed above
+            images = soup2.find_all('img')
             
             for img in images:
                 src = img.get('src', '') + img.get('data-src', '')
@@ -194,7 +195,8 @@ class CMSPlaceholderDetector:
                     result["placeholder_images"].append(src[:100])
             
             # Detectar copyright desactualizado
-            copyright_pattern = r'©?\s*(?:copyright\s+)?(?:©\s*)?(\d{4})(?:\s*-\s*(\d{4}))?'
+            # Requiere símbolo © o palabra "copyright" junto al año
+            copyright_pattern = r'(?:\u00a9|copyright)\s*(?:\u00a9\s*)?(\d{4})(?:\s*[-\u2013]\s*(\d{4}))?'
             copyright_matches = re.findall(copyright_pattern, html_content, re.IGNORECASE)
             
             current_year = datetime.now().year

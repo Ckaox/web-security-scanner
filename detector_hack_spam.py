@@ -23,17 +23,18 @@ class HackDetector:
     
     # Patrones de spam SEO
     SPAM_SEO_PATTERNS = [
-        (r"(?:casino|poker|slots).*?online", "casino spam"),
-        (r"(?:viagra|cialis|levitra|pharmacy)", "pharma spam"),
-        (r"payday\s+loans?", "payday loan spam"),
-        (r"(?:buy|cheap).*?(?:viagra|cialis)", "pharma spam"),
-        (r"online\s+(?:gambling|betting)", "gambling spam"),
+        (r"\b(?:casino|poker|slots)\b.*?\bonline\b", "casino spam"),
+        (r"\b(?:viagra|cialis|levitra)\b", "pharma spam"),
+        (r"\bpharmacy\b(?!.*?(?:farmacia|botica|apoteca))", "pharma spam"),
+        (r"\bpayday\s+loans?\b", "payday loan spam"),
+        (r"\b(?:buy|cheap)\b.*?\b(?:viagra|cialis)\b", "pharma spam"),
+        (r"\bonline\s+(?:gambling|betting)\b", "gambling spam"),
     ]
     
     # Patrones sospechosos en WordPress
     WP_SUSPICIOUS_PATTERNS = [
-        r"wp-content/.*?(?:casino|poker|viagra|cialis)",
-        r"wp-includes/.*?\.php\?\w+=",
+        r"wp-content/[^\"'<>\s]{0,100}\b(?:casino|poker|viagra|cialis)\b",
+        r"wp-includes/[^\"'<>\s]{0,100}\.php\?\w+=",
     ]
     
     # Patrones de código malicioso
@@ -46,27 +47,33 @@ class HackDetector:
     ]
     
     # Patrones de API keys y tokens hardcodeados (NUEVO - Fase 1)
+    # Nota: Google Maps API keys (AIza...) son públicas por diseño - se reportan como info, no crítico
     API_KEY_PATTERNS = [
-        (r'api[_-]?key["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]{20,})["\']', 'API Key'),
-        (r'apikey["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]{20,})["\']', 'API Key'),
+        (r'api[_-]?key["\']?\s*[:=]\s*["\']((?!AIza)[a-zA-Z0-9_-]{20,})["\']', 'API Key'),
+        (r'apikey["\']?\s*[:=]\s*["\']((?!AIza)[a-zA-Z0-9_-]{20,})["\']', 'API Key'),
         (r'secret[_-]?key["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]{20,})["\']', 'Secret Key'),
         (r'access[_-]?token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]{20,})["\']', 'Access Token'),
         (r'auth[_-]?token["\']?\s*[:=]\s*["\']([a-zA-Z0-9_-]{20,})["\']', 'Auth Token'),
         (r'sk_live_[a-zA-Z0-9]{20,}', 'Stripe Live Key'),
         (r'sk_test_[a-zA-Z0-9]{20,}', 'Stripe Test Key'),
-        (r'pk_live_[a-zA-Z0-9]{20,}', 'Stripe Publishable Key'),
-        (r'AIza[0-9A-Za-z_-]{35}', 'Google API Key'),
         (r'AKIA[0-9A-Z]{16}', 'AWS Access Key'),
         (r'ghp_[a-zA-Z0-9]{36}', 'GitHub Personal Token'),
         (r'gho_[a-zA-Z0-9]{36}', 'GitHub OAuth Token'),
     ]
     
+    # Patrones de API keys públicas (reportar como info, no crítico)
+    PUBLIC_KEY_PATTERNS = [
+        (r'AIza[0-9A-Za-z_-]{35}', 'Google Maps API Key (public)'),
+        (r'pk_live_[a-zA-Z0-9]{20,}', 'Stripe Publishable Key (public)'),
+        (r'pk_test_[a-zA-Z0-9]{20,}', 'Stripe Test Publishable Key (public)'),
+    ]
+    
     # Comentarios sospechosos en HTML (NUEVO - Fase 1)
+    # Excluir comentarios condicionales de IE <!--[if...]>
     SUSPICIOUS_COMMENTS = [
-        r'<!--.*?(?:password|passwd|pwd).*?-->',
-        r'<!--.*?(?:TODO|FIXME|HACK).*?(?:remove|delete|fix).*?-->',
-        r'<!--.*?(?:debug|test).*?(?:mode|enabled).*?-->',
-        r'<!--.*?(?:admin|root).*?-->',
+        r'<!--(?!\[if).*?(?:password|passwd|pwd)\s*[:=].*?-->',
+        r'<!--(?!\[if).*?(?:TODO|FIXME|HACK).*?(?:remove|delete|fix).*?-->',
+        r'<!--(?!\[if).*?(?:debug|test)\s*(?:mode|enabled)\s*[:=].*?-->',
     ]
     
     def __init__(self):
@@ -74,7 +81,8 @@ class HackDetector:
         self.spam_regex = [(re.compile(pattern, re.IGNORECASE), label) for pattern, label in self.SPAM_SEO_PATTERNS]
         self.wp_regex = [re.compile(pattern, re.IGNORECASE) for pattern in self.WP_SUSPICIOUS_PATTERNS]
         self.malware_regex = [re.compile(pattern, re.IGNORECASE) for pattern in self.MALWARE_PATTERNS]
-        self.api_key_regex = [(re.compile(pattern, re.IGNORECASE), label) if isinstance(pattern, str) else (re.compile(pattern[0], re.IGNORECASE), pattern[1]) for pattern, label in self.API_KEY_PATTERNS]
+        self.api_key_regex = [(re.compile(pattern, re.IGNORECASE), label) for pattern, label in self.API_KEY_PATTERNS]
+        self.public_key_regex = [(re.compile(pattern, re.IGNORECASE), label) for pattern, label in self.PUBLIC_KEY_PATTERNS]
         self.comment_regex = [re.compile(pattern, re.IGNORECASE | re.DOTALL) for pattern in self.SUSPICIOUS_COMMENTS]
     
     def detect(self, html_content: str, url: str) -> Dict:
@@ -93,12 +101,14 @@ class HackDetector:
             "has_spam_seo": False,
             "has_malware": False,
             "has_exposed_keys": False,
+            "has_public_keys": False,
             "has_suspicious_comments": False,
             "hack_indicators": [],
             "spam_indicators": [],
             "malware_indicators": [],
             "hidden_content": [],
             "exposed_keys": [],
+            "public_keys": [],
             "suspicious_comments": [],
             "severity": "none"
         }
@@ -148,7 +158,7 @@ class HackDetector:
                 for match in matches[:3]:  # Limitar a 3 ejemplos
                     # Obtener solo los primeros y últimos 4 chars para no exponer la key completa
                     if isinstance(match, tuple):
-                        key_value = match[0] if match[0] else match[1]
+                        key_value = match[0] if match[0] else (match[1] if len(match) > 1 else '')
                     else:
                         key_value = match
                     
@@ -161,27 +171,56 @@ class HackDetector:
                     if key_info not in results["exposed_keys"]:
                         results["exposed_keys"].append(key_info)
         
-        # Detectar comentarios HTML sospechosos (NUEVO - Fase 1)
-        for regex in self.comment_regex:
+        # Detectar API keys públicas (info, no crítico - ej: Google Maps, Stripe Publishable)
+        for regex, key_type in self.public_key_regex:
             matches = regex.findall(html_content)
             if matches:
-                results["has_suspicious_comments"] = True
+                results["has_public_keys"] = True
                 for match in matches[:3]:
-                    comment = match[:100].strip()
-                    if comment not in results["suspicious_comments"]:
-                        results["suspicious_comments"].append(comment)
+                    key_value = match if isinstance(match, str) else match[0]
+                    if len(key_value) > 8:
+                        masked = f"{key_value[:4]}...{key_value[-4:]}"
+                    else:
+                        masked = "***"
+                    key_info = f"{key_type}: {masked}"
+                    if key_info not in results["public_keys"]:
+                        results["public_keys"].append(key_info)
+        
+        # Detectar comentarios HTML sospechosos (NUEVO - Fase 1)
+        # Primero extraer cada comentario individualmente, luego analizarlos
+        comment_extractor = re.compile(r'<!--(.*?)-->', re.DOTALL)
+        html_comments = comment_extractor.findall(html_content)
+        
+        # Patrones sospechosos dentro de comentarios individuales
+        suspicious_in_comment = [
+            re.compile(r'(?:password|passwd|pwd)\s*[:=]\s*\S+', re.IGNORECASE),
+            re.compile(r'(?:TODO|FIXME|HACK).*?(?:remove|delete|fix)', re.IGNORECASE | re.DOTALL),
+            re.compile(r'(?:debug|test)\s*(?:mode|enabled)\s*[:=]\s*(?:true|1|on)', re.IGNORECASE),
+        ]
+        
+        for comment_text in html_comments[:50]:  # Limitar a 50 comentarios
+            comment_text = comment_text.strip()
+            if not comment_text or comment_text.startswith('[if'):
+                continue  # Saltar comentarios condicionales de IE
+            for pattern in suspicious_in_comment:
+                if pattern.search(comment_text):
+                    results["has_suspicious_comments"] = True
+                    short_comment = f"<!--{comment_text[:80]}-->"
+                    if short_comment not in results["suspicious_comments"]:
+                        results["suspicious_comments"].append(short_comment)
+                    break
         
         # Detectar contenido oculto (usando BeautifulSoup)
         try:
             soup = BeautifulSoup(html_content, 'lxml')
             
-            # Buscar elementos con display:none que contengan spam keywords
-            spam_keywords = ['casino', 'poker', 'viagra', 'cialis', 'payday', 'loan']
+            # Buscar elementos con display:none que contengan spam keywords (con word boundaries)
+            spam_keywords_regex = re.compile(r'\b(?:casino|poker|viagra|cialis|payday|loan)\b', re.IGNORECASE)
             hidden_elements = soup.find_all(style=re.compile(r'display\s*:\s*none', re.IGNORECASE))
             
             for element in hidden_elements[:5]:
-                text = element.get_text().lower()
-                if any(keyword in text for keyword in spam_keywords):
+                text = element.get_text()
+                if spam_keywords_regex.search(text):
                     results["hidden_content"].append(f"Hidden spam: {text[:100]}")
                     results["has_spam_seo"] = True
         except Exception as e:

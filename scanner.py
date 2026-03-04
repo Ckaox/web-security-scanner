@@ -6,7 +6,7 @@ from typing import Dict
 import time
 from urllib.parse import urlparse
 import warnings
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 # Suprimir warnings de SSL
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
@@ -38,6 +38,59 @@ class WebScanner:
         self.ssl_seo_detector = SSLSEODetector()
         self.cms_detector = CMSPlaceholderDetector()
         self.sensitive_detector = SensitiveInfoDetector(timeout=5, user_agent=self.user_agent)
+    
+    def _detect_maintenance_mode(self, status_code: int, html_content: str) -> Dict:
+        """
+        Detecta si el sitio está en modo mantenimiento
+        
+        Args:
+            status_code: Código HTTP de la respuesta
+            html_content: Contenido HTML de la página
+            
+        Returns:
+            Dict con información de modo mantenimiento
+        """
+        import re
+        result = {
+            "is_maintenance": False,
+            "indicators": [],
+            "severity": "none"
+        }
+        
+        # Verificar por código HTTP
+        if status_code in [503, 502]:
+            result["is_maintenance"] = True
+            result["indicators"].append(f"HTTP {status_code} - Service Unavailable")
+        
+        # Verificar por contenido HTML (tanto en español como en inglés)
+        html_lower = html_content.lower() if html_content else ""
+        
+        maintenance_patterns = [
+            (r'\bcoming\s+soon\b', 'Coming soon page'),
+            (r'\bunder\s+construction\b', 'Under construction'),
+            (r'\bunder\s+maintenance\b', 'Under maintenance'),
+            (r'\btemporarily\s+unavailable\b', 'Temporarily unavailable'),
+            (r'\bmaintenance\s+mode\b', 'Maintenance mode active'),
+            (r'\ben\s+(?:modo\s+)?mantenimiento\b', 'En mantenimiento'),
+            (r'\ben\s+construcci[oó]n\b', 'En construcción'),
+            (r'\bpr[oó]ximamente\b', 'Próximamente'),
+            (r'\bsitio\s+en\s+(?:mantenimiento|construcci[oó]n)\b', 'Sitio en mantenimiento'),
+            (r'\bwe(?:\x27|&#39;)?re\s+(?:currently\s+)?(?:updating|redesigning|working)\b', 'Site being updated'),
+            (r'\bsite\s+is\s+(?:currently\s+)?(?:down|offline|unavailable)\b', 'Site offline'),
+            (r'\bvolver[eá]\s+pronto\b', 'Volverá pronto'),
+            (r'\bwp-maintenance-mode\b', 'WordPress maintenance mode plugin'),
+        ]
+        
+        for pattern, description in maintenance_patterns:
+            if re.search(pattern, html_lower):
+                result["is_maintenance"] = True
+                if description not in result["indicators"]:
+                    result["indicators"].append(description)
+        
+        if result["is_maintenance"]:
+            result["severity"] = "high"
+        
+        return result
     
     def fetch_url(self, url: str) -> Dict:
         """
@@ -121,6 +174,7 @@ class WebScanner:
                 "seo": {},
                 "cms": {},
                 "placeholder": {},
+                "maintenance_mode": {},
             }
         }
         
@@ -147,6 +201,12 @@ class WebScanner:
         html_content = fetch_result["content"]
         final_url = fetch_result["final_url"]
         
+        # 1b. Detectar modo mantenimiento
+        print("  ✓ Checking maintenance mode...")
+        scan_result["results"]["maintenance_mode"] = self._detect_maintenance_mode(
+            fetch_result["status_code"], html_content
+        )
+        
         # 2. Detectar errores PHP
         print("  ✓ Checking PHP errors...")
         scan_result["results"]["php_errors"] = self.php_detector.detect(html_content, final_url)
@@ -161,6 +221,13 @@ class WebScanner:
             final_url, 
             fetch_result["headers"]
         )
+        
+        # 4b. Verificar contenido mixto
+        if self.ssl_seo_detector.detect_mixed_content(html_content, final_url):
+            scan_result["results"]["ssl"]["has_mixed_content"] = True
+            scan_result["results"]["ssl"]["issues"].append("Mixed content detected (HTTP resources on HTTPS page)")
+            if scan_result["results"]["ssl"]["severity"] == "none":
+                scan_result["results"]["ssl"]["severity"] = "medium"
         
         # 5. Análisis SEO
         print("  ✓ Analyzing SEO...")
@@ -187,6 +254,7 @@ class WebScanner:
             "ssl": scan_result["results"]["ssl"].get("severity", "none"),
             "seo": scan_result["results"]["seo"].get("severity", "none"),
             "placeholder": scan_result["results"]["placeholder"].get("severity", "none"),
+            "maintenance_mode": scan_result["results"]["maintenance_mode"].get("severity", "none"),
         }
         
         # Agregar severidades de Fase 2 si está habilitada
@@ -265,6 +333,13 @@ class WebScanner:
         # Detalles por categoría
         results = scan_result["results"]
         
+        # Maintenance Mode
+        if results.get("maintenance_mode", {}).get("is_maintenance"):
+            print(f"\n\U0001f6a7 MAINTENANCE MODE DETECTED:")
+            for indicator in results["maintenance_mode"]["indicators"]:
+                print(f"   - {indicator}")
+            print(f"   ⚠️  Results may be incomplete - site is not serving normal content")
+        
         # PHP Errors
         if results["php_errors"]["has_errors"]:
             print(f"\n🔴 PHP/DATABASE ERRORS:")
@@ -292,8 +367,12 @@ class WebScanner:
             print(f"\n🚨 API KEYS / TOKENS EXPOSED IN CODE (CRITICAL):")
             for key_info in results["security"]["exposed_keys"][:5]:
                 print(f"   🚨 {key_info}")
-        
-        # Comentarios sospechosos (NUEVO - Fase 1)
+                # API Keys públicas (informativo)
+        if results["security"].get("has_public_keys"):
+            print(f"\n\u2139\ufe0f  PUBLIC API KEYS IN CODE (informational):")
+            for key_info in results["security"]["public_keys"][:5]:
+                print(f"   - {key_info}")
+                # Comentarios sospechosos (NUEVO - Fase 1)
         if results["security"].get("has_suspicious_comments"):
             print(f"\n⚠️  SUSPICIOUS COMMENTS IN HTML:")
             for comment in results["security"]["suspicious_comments"][:3]:
@@ -301,9 +380,14 @@ class WebScanner:
         
         # SSL
         if results["ssl"]["issues"]:
-            print(f"\n🔒 SSL/SECURITY HEADERS:")
+            print(f"\n\U0001f512 SSL ISSUES:")
             for issue in results["ssl"]["issues"][:3]:
-                print(f"   - {issue}")
+                print(f"   \U0001f534 {issue}")
+        
+        if results["ssl"].get("missing_headers"):
+            print(f"\n\U0001f6e1\ufe0f  SECURITY HEADERS (informational):")
+            for header in results["ssl"]["missing_headers"][:3]:
+                print(f"   - {header}")
         
         # SEO
         if results["seo"]["issues"]:
@@ -315,6 +399,11 @@ class WebScanner:
         if results["cms"]["is_wordpress"]:
             print(f"\n🔧 CMS DETECTED:")
             print(f"   - WordPress {results['cms']['version'] or 'version unknown'}")
+            if results["cms"]["is_outdated"]:
+                print(f"   ⚠️  WordPress version is OUTDATED")
+            if results["cms"]["plugins_detected"]:
+                print(f"   - Plugins detected: {len(results['cms']['plugins_detected'])}")
+        
         # Información sensible (Fase 2)
         if results.get("sensitive_info"):
             sensitive = results["sensitive_info"]
@@ -355,11 +444,6 @@ class WebScanner:
                 print(f"   ⚠️  Accessible disallowed paths: {len(sensitive['robots_analysis']['accessible_disallowed'])}")
                 for path_info in sensitive["robots_analysis"]["accessible_disallowed"][:3]:
                     print(f"     - {path_info['path']}")
-        
-            if results["cms"]["is_outdated"]:
-                print(f"   ⚠️  WordPress version is OUTDATED")
-            if results["cms"]["plugins_detected"]:
-                print(f"   - Plugins detected: {len(results['cms']['plugins_detected'])}")
         
         # Placeholder
         if results["placeholder"]["has_placeholder"]:

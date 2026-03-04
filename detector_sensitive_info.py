@@ -5,6 +5,7 @@ import re
 import requests
 from typing import Dict, List
 from urllib.parse import urljoin, urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -170,7 +171,7 @@ class SensitiveInfoDetector:
                     sensitive_keywords = ['password', 'secret', 'api_key', 'token', 'database', 'mysql']
                     result["contains_sensitive"] = any(keyword in content_lower for keyword in sensitive_keywords)
         
-        except:
+        except (requests.exceptions.RequestException, Exception):
             pass
         
         return result
@@ -219,7 +220,7 @@ class SensitiveInfoDetector:
                     # Estimar cantidad de archivos (contar <a href> aproximadamente)
                     result["file_count_estimate"] = content.count('<a href') - 1  # -1 para parent dir
         
-        except:
+        except (requests.exceptions.RequestException, Exception):
             pass
         
         return result
@@ -257,7 +258,7 @@ class SensitiveInfoDetector:
                         "file": file_path,
                         "size": check_result["size"]
                     })
-                    print(f"    🚨 Found: {file_path} ({check_result['size']} bytes)")
+                    print(f"    \U0001f6a8 Found: {file_path} ({check_result['size']} bytes)")
         
         # Determinar severidad
         if result["sensitive_files"]:
@@ -492,7 +493,7 @@ class SensitiveInfoDetector:
     
     def detect_all(self, base_url: str) -> Dict:
         """
-        Ejecuta todas las verificaciones de información sensible
+        Ejecuta todas las verificaciones de información sensible en paralelo
         
         Args:
             base_url: URL base del sitio
@@ -500,14 +501,34 @@ class SensitiveInfoDetector:
         Returns:
             Dict con todos los resultados
         """
-        return {
-            "sensitive_files": self.scan_sensitive_files(base_url, max_checks=15),
-            "directory_listing": self.scan_directory_listing(base_url, max_checks=5),
-            "install_files": self.scan_install_files(base_url),
-            "admin_panels": self.scan_admin_panels(base_url),
-            "log_files": self.scan_log_files(base_url),
-            "robots_analysis": self.scan_robots_txt(base_url),
+        results = {}
+        
+        # Definir todas las tareas de escaneo
+        scan_tasks = {
+            "sensitive_files": lambda: self.scan_sensitive_files(base_url, max_checks=15),
+            "directory_listing": lambda: self.scan_directory_listing(base_url, max_checks=5),
+            "install_files": lambda: self.scan_install_files(base_url),
+            "admin_panels": lambda: self.scan_admin_panels(base_url),
+            "log_files": lambda: self.scan_log_files(base_url),
+            "robots_analysis": lambda: self.scan_robots_txt(base_url),
         }
+        
+        # Ejecutar todas las tareas en paralelo
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_name = {
+                executor.submit(task): name 
+                for name, task in scan_tasks.items()
+            }
+            
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    results[name] = future.result()
+                except Exception as e:
+                    print(f"    Error in {name}: {str(e)[:100]}")
+                    results[name] = {"error": str(e), "severity": "none"}
+        
+        return results
 
 
 def test_sensitive_info_detector():

@@ -99,8 +99,11 @@ def scan_url():
         # Guardar en historial (limitado a últimos 100)
         scan_history[scan_id] = scan_result
         if len(scan_history) > 100:
-            # Eliminar el más antiguo
-            oldest = min(scan_history.keys())
+            # Eliminar el más antiguo por timestamp
+            oldest = min(
+                scan_history.keys(),
+                key=lambda k: scan_history[k].get('scan_timestamp', '')
+            )
             del scan_history[oldest]
         
         print(f"✅ Scan completed: {scan_id}")
