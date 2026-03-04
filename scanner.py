@@ -196,6 +196,7 @@ class WebScanner:
             scan_result["overall_severity"] = "critical"
             scan_result["issues_summary"]["critical"] = 1
             scan_result["issues_summary"]["total"] = 1
+            scan_result["suggestions"] = self.generate_suggestions(scan_result)
             return scan_result
         
         html_content = fetch_result["content"]
@@ -292,6 +293,9 @@ class WebScanner:
         scan_result["overall_severity"] = max_severity
         scan_result["scan_duration"] = round(time.time() - start_time, 2)
         
+        # 9. Generar sugerencias accionables
+        scan_result["suggestions"] = self.generate_suggestions(scan_result)
+        
         return scan_result
     
     def print_summary(self, scan_result: Dict):
@@ -338,6 +342,16 @@ class WebScanner:
             error_msg = scan_result["fetch_info"].get("error", "Unknown error")
             print(f"\n🚨 FETCH FAILED: {error_msg}")
             print(f"   Cannot analyze site - connection failed.")
+            
+            suggestions = scan_result.get("suggestions", [])
+            if suggestions:
+                print(f"\n{'─'*70}")
+                print(f"💡 RECOMMENDATIONS ({len(suggestions)}):")
+                print(f"{'─'*70}")
+                for sug in suggestions:
+                    icon = {"critical": "🚨", "high": "🔴", "medium": "⚠️", "low": "ℹ️"}.get(sug.get("priority", ""), "•")
+                    print(f"   {icon} {sug['text']}")
+            
             print("\n" + "="*70)
             return
         
@@ -485,7 +499,293 @@ class WebScanner:
         if placeholder.get("is_copyright_outdated"):
             print(f"   - Outdated copyright: {placeholder.get('copyright_year')}")
         
+        # SUGGESTIONS
+        suggestions = scan_result.get("suggestions", [])
+        if suggestions:
+            print(f"\n{'─'*70}")
+            print(f"💡 RECOMMENDATIONS ({len(suggestions)}):")
+            print(f"{'─'*70}")
+            for i, sug in enumerate(suggestions, 1):
+                priority = sug.get("priority", "")
+                icon = {"critical": "🚨", "high": "🔴", "medium": "⚠️", "low": "ℹ️"}.get(priority, "•")
+                print(f"   {icon} {sug['text']}")
+        else:
+            print(f"\n💡 No recommendations — site looks good!")
+        
         print("\n" + "="*70)
+    
+    def generate_suggestions(self, scan_result: Dict) -> list:
+        """
+        Genera sugerencias accionables priorizadas a partir de todos los resultados.
+        Cada sugerencia es un dict: {priority, category, text}
+        Priority: critical > high > medium > low
+        Máximo ~10 sugerencias, las más importantes primero.
+        """
+        suggestions = []
+        results = scan_result.get("results", {})
+        
+        if not scan_result.get("fetch_info", {}).get("success"):
+            suggestions.append({
+                "priority": "critical",
+                "category": "connectivity",
+                "text": "The website is unreachable. Verify the domain is correct, the server is online, and DNS is properly configured."
+            })
+            return suggestions
+        
+        # ── MAINTENANCE MODE ──
+        maint = results.get("maintenance_mode", {})
+        if maint.get("is_maintenance"):
+            suggestions.append({
+                "priority": "high",
+                "category": "maintenance",
+                "text": "Site is in maintenance mode — visitors cannot access content. Disable maintenance mode or set an estimated return time."
+            })
+        
+        # ── SECURITY: HACKED / MALWARE / SPAM ──
+        sec = results.get("security", {})
+        if sec.get("is_hacked"):
+            suggestions.append({
+                "priority": "critical",
+                "category": "security",
+                "text": "Site shows signs of being hacked. Immediately: restore from a clean backup, change all passwords, update all software, and audit server access logs."
+            })
+        if sec.get("has_malware"):
+            suggestions.append({
+                "priority": "critical",
+                "category": "security",
+                "text": "Malware code detected in the page source. Scan the server with a security tool (e.g. Wordfence, Sucuri) and remove all malicious scripts."
+            })
+        if sec.get("has_spam_seo"):
+            suggestions.append({
+                "priority": "critical",
+                "category": "security",
+                "text": "SEO spam injected into the site (pharma/casino links). Clean the database and templates, then check for unauthorized admin users."
+            })
+        if sec.get("has_exposed_keys"):
+            suggestions.append({
+                "priority": "critical",
+                "category": "security",
+                "text": "Private API keys or tokens are exposed in the HTML source. Revoke them immediately, generate new ones, and move them to server-side environment variables."
+            })
+        if sec.get("has_suspicious_comments"):
+            suggestions.append({
+                "priority": "medium",
+                "category": "security",
+                "text": "Suspicious HTML comments found (possible debug info or backdoor markers). Review and remove any unnecessary comments from production code."
+            })
+        
+        # ── PHP / DB ERRORS ──
+        php = results.get("php_errors", {})
+        if php.get("has_errors"):
+            php_list = php.get("php_errors", [])
+            db_list = php.get("db_errors", [])
+            if db_list:
+                suggestions.append({
+                    "priority": "critical",
+                    "category": "errors",
+                    "text": "Database errors are visible to visitors. Check the DB connection credentials, ensure the database server is running, and set display_errors = Off in php.ini."
+                })
+            if php_list:
+                suggestions.append({
+                    "priority": "high",
+                    "category": "errors",
+                    "text": f"PHP errors are exposed to visitors ({len(php_list)} found). Set display_errors = Off in production and review the error log to fix the underlying issues."
+                })
+        
+        # ── SSL / HTTPS ──
+        ssl_data = results.get("ssl", {})
+        if not ssl_data.get("has_https"):
+            suggestions.append({
+                "priority": "high",
+                "category": "ssl",
+                "text": "Site is not using HTTPS. Install an SSL certificate (free via Let's Encrypt) and redirect all HTTP traffic to HTTPS."
+            })
+        elif not ssl_data.get("has_valid_certificate"):
+            suggestions.append({
+                "priority": "high",
+                "category": "ssl",
+                "text": "SSL certificate has a problem (invalid, self-signed, or hostname mismatch). Renew or replace the certificate."
+            })
+        else:
+            cert = ssl_data.get("certificate", {})
+            days = cert.get("days_remaining")
+            if days is not None and days < 0:
+                suggestions.append({
+                    "priority": "critical",
+                    "category": "ssl",
+                    "text": f"SSL certificate EXPIRED {abs(days)} days ago. Renew it immediately — browsers are showing security warnings to all visitors."
+                })
+            elif days is not None and days < 30:
+                suggestions.append({
+                    "priority": "medium",
+                    "category": "ssl",
+                    "text": f"SSL certificate expires in {days} days ({cert.get('expires')}). Renew soon or enable auto-renewal to avoid downtime."
+                })
+        
+        if ssl_data.get("has_mixed_content"):
+            suggestions.append({
+                "priority": "medium",
+                "category": "ssl",
+                "text": "Mixed content detected: some resources load over HTTP on an HTTPS page. Update all asset URLs to use HTTPS or protocol-relative paths."
+            })
+        
+        missing_hdrs = ssl_data.get("missing_headers", [])
+        if missing_hdrs:
+            header_names = ", ".join(h.replace("Missing ", "").replace(" header", "") for h in missing_hdrs)
+            suggestions.append({
+                "priority": "low",
+                "category": "headers",
+                "text": f"Missing security headers: {header_names}. Configure them in your web server to improve defense against clickjacking and MIME sniffing."
+            })
+        
+        # ── SENSITIVE FILES (Phase 2) ──
+        sensitive = results.get("sensitive_info", {})
+        
+        inst = sensitive.get("install_files", {})
+        if inst.get("install_files_found"):
+            files = ", ".join(f["file"] for f in inst["install_files_found"][:3])
+            suggestions.append({
+                "priority": "critical",
+                "category": "sensitive",
+                "text": f"Installation files found and accessible ({files}). Delete them immediately — they can be used to reinstall/reset your site."
+            })
+        
+        sf = sensitive.get("sensitive_files", {})
+        if sf.get("sensitive_files"):
+            files = ", ".join(f["file"] for f in sf["sensitive_files"][:3])
+            suggestions.append({
+                "priority": "critical",
+                "category": "sensitive",
+                "text": f"Sensitive files exposed ({files}). Block public access via .htaccess or server config — they may contain passwords or config data."
+            })
+        
+        lf = sensitive.get("log_files", {})
+        if lf.get("exposed_logs"):
+            suggestions.append({
+                "priority": "high",
+                "category": "sensitive",
+                "text": "Log files are publicly accessible. Move them outside the web root or block access — they can reveal server paths, errors, and user data."
+            })
+        
+        dl = sensitive.get("directory_listing", {})
+        if dl.get("exposed_directories"):
+            count = len(dl["exposed_directories"])
+            suggestions.append({
+                "priority": "high",
+                "category": "sensitive",
+                "text": f"Directory listing is enabled on {count} folder(s). Disable it with 'Options -Indexes' in .htaccess to prevent exposing your file structure."
+            })
+        
+        ap = sensitive.get("admin_panels", {})
+        panels = ap.get("accessible_panels", [])
+        if panels:
+            panel_names = ", ".join(p["panel"] for p in panels[:3])
+            suggestions.append({
+                "priority": "medium",
+                "category": "sensitive",
+                "text": f"Admin panel(s) accessible ({panel_names}). Restrict access by IP, add 2FA, or move to a custom URL to reduce brute-force risk."
+            })
+        
+        # ── CMS ──
+        cms = results.get("cms", {})
+        if cms.get("is_wordpress"):
+            if cms.get("is_outdated"):
+                suggestions.append({
+                    "priority": "high",
+                    "category": "cms",
+                    "text": f"WordPress version {cms.get('version', '?')} is outdated. Update to the latest version to patch known security vulnerabilities."
+                })
+            outdated_plugins = [p for p in cms.get("plugins_detected", []) if isinstance(p, dict) and p.get("outdated")]
+            plugin_count = len(cms.get("plugins_detected", []))
+            if plugin_count > 15:
+                suggestions.append({
+                    "priority": "medium",
+                    "category": "cms",
+                    "text": f"{plugin_count} plugins detected. Review and deactivate unused plugins to reduce attack surface and improve performance."
+                })
+        
+        # ── SEO ──
+        seo = results.get("seo", {})
+        seo_issues = seo.get("issues", [])
+        if seo_issues:
+            # Group & prioritize SEO suggestions
+            if any("Missing title" in i or "Title tag is empty" in i for i in seo_issues):
+                suggestions.append({
+                    "priority": "high",
+                    "category": "seo",
+                    "text": "The page is missing a <title> tag. Add a descriptive, keyword-rich title (50-60 characters) — this is critical for search engine ranking."
+                })
+            if any("Missing meta description" in i for i in seo_issues):
+                suggestions.append({
+                    "priority": "medium",
+                    "category": "seo",
+                    "text": "Missing meta description. Add a compelling description (120-160 characters) that summarizes the page content for search results."
+                })
+            if any("Missing H1" in i for i in seo_issues):
+                suggestions.append({
+                    "priority": "medium",
+                    "category": "seo",
+                    "text": "No H1 heading found. Add a single, descriptive H1 tag — search engines use it to understand the main topic of the page."
+                })
+            if any("Multiple H1" in i for i in seo_issues):
+                suggestions.append({
+                    "priority": "low",
+                    "category": "seo",
+                    "text": "Multiple H1 tags detected. Use a single H1 for the main heading and H2-H6 for subheadings to improve content hierarchy."
+                })
+            alt_issue = next((i for i in seo_issues if "images missing alt" in i), None)
+            if alt_issue:
+                suggestions.append({
+                    "priority": "low",
+                    "category": "seo",
+                    "text": f"Images without alt text: {alt_issue.split(')')[0].split('(')[-1] if '(' in alt_issue else 'some'}. Add descriptive alt attributes for accessibility and SEO."
+                })
+        
+        # ── PLACEHOLDER / COPYRIGHT ──
+        placeholder = results.get("placeholder", {})
+        if placeholder.get("has_placeholder"):
+            suggestions.append({
+                "priority": "medium",
+                "category": "content",
+                "text": "Placeholder/dummy content detected. Replace it with real content before it affects your professional image and SEO."
+            })
+        if placeholder.get("is_copyright_outdated"):
+            year = placeholder.get("copyright_year", "?")
+            suggestions.append({
+                "priority": "low",
+                "category": "content",
+                "text": f"Copyright year is outdated ({year}). Update it to the current year to show the site is actively maintained."
+            })
+        
+        # ── PUBLIC API KEYS (informational) ──
+        if sec.get("has_public_keys"):
+            suggestions.append({
+                "priority": "low",
+                "category": "security",
+                "text": "Public API keys found in source (e.g. Google Maps). While not secret, consider restricting them by referrer/IP in the provider's console."
+            })
+        
+        # ── RESPONSE TIME ──
+        resp_time = scan_result.get("fetch_info", {}).get("response_time", 0)
+        if resp_time > 5:
+            suggestions.append({
+                "priority": "medium",
+                "category": "performance",
+                "text": f"Response time is slow ({resp_time}s). Investigate server performance, enable caching, optimize images, and consider a CDN."
+            })
+        elif resp_time > 3:
+            suggestions.append({
+                "priority": "low",
+                "category": "performance",
+                "text": f"Response time is {resp_time}s. Consider enabling server-side caching and image optimization to improve loading speed."
+            })
+        
+        # Sort by priority (critical first)
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        suggestions.sort(key=lambda s: priority_order.get(s["priority"], 99))
+        
+        # Limit to top 10 most important
+        return suggestions[:10]
 
 
 def test_real_url():
